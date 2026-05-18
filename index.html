@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<!-- Playables SDK -->
+<script>// Playables SDK v1.0.0
+// Game lifecycle bridge: rAF-based game-ready detection + event communication
+(function() {
+  'use strict';
+
+  // Idempotency: skip if already initialized (e.g., server-side injection
+  // followed by client-side inject-javascript via the Bloks webview component).
+  if (window.playablesSDK) return;
+
+  var HANDLER_NAME = 'playablesGameEventHandler';
+  var ANDROID_BRIDGE_NAME = '_MetaPlayablesBridge';
+  var RAF_FRAME_THRESHOLD = 3;
+
+  var gameReadySent = false;
+  var firstInteractionSent = false;
+  var errorSent = false;
+  var frameCount = 0;
+  var originalRAF = window.requestAnimationFrame;
+
+  // --- Transport Layer ---
+
+  function hasIOSBridge() {
+    return !!(window.webkit &&
+              window.webkit.messageHandlers &&
+              window.webkit.messageHandlers[HANDLER_NAME]);
+  }
+
+  function hasAndroidBridge() {
+    return !!(window[ANDROID_BRIDGE_NAME] &&
+              typeof window[ANDROID_BRIDGE_NAME].postEvent === 'function');
+  }
+
+  function isInIframe() {
+    return !!(window.parent && window.parent !== window);
+  }
+
+  function sendEvent(eventName, payload) {
+    var message = {
+      type: eventName,
+      payload: payload || {},
+      timestamp: Date.now()
+    };
+
+    if (hasIOSBridge()) {
+      try {
+        window.webkit.messageHandlers[HANDLER_NAME].postMessage(message);
+      } catch (e) { /* ignore */ }
+      return;
+    }
+
+    if (hasAndroidBridge()) {
+    try {
+      var p = payload || {};
+      p.__secureToken = window.__fbAndroidBridgeAuthToken || '';
+      p.timestamp = message.timestamp;
+      window[ANDROID_BRIDGE_NAME].postEvent(
+        eventName,
+        JSON.stringify(p)
+      );
+    } catch (e) { /* ignore */ }
+    return;
+  }
+
+    if (isInIframe()) {
+      try {
+        window.parent.postMessage(message, '*');
+      } catch (e) { /* ignore */ }
+      return;
+    }
+  }
+
+  // --- rAF Game-Ready Detection ---
+
+  function onFrame() {
+    if (gameReadySent) return;
+
+    frameCount++;
+    if (frameCount >= RAF_FRAME_THRESHOLD) {
+      gameReadySent = true;
+      sendEvent('game_ready', {
+        frame_count: frameCount,
+        detected_at: Date.now()
+      });
+      return;
+    }
+
+    originalRAF.call(window, onFrame);
+  }
+
+  if (originalRAF) {
+    window.requestAnimationFrame = function(callback) {
+      if (!gameReadySent) {
+        return originalRAF.call(window, function(timestamp) {
+          frameCount++;
+          if (frameCount >= RAF_FRAME_THRESHOLD && !gameReadySent) {
+            gameReadySent = true;
+            sendEvent('game_ready', {
+              frame_count: frameCount,
+              detected_at: Date.now()
+            });
+          }
+          callback(timestamp);
+        });
+      }
+      return originalRAF.call(window, callback);
+    };
+  }
+
+  // --- First User Interaction Detection ---
+
+  function setupFirstInteractionDetection() {
+    var events = ['touchstart', 'mousedown', 'keydown'];
+
+    function onFirstInteraction() {
+      if (firstInteractionSent) return;
+      firstInteractionSent = true;
+      sendEvent('user_interaction_start', null);
+
+      for (var i = 0; i < events.length; i++) {
+        document.removeEventListener(events[i], onFirstInteraction, true);
+      }
+    }
+
+    for (var i = 0; i < events.length; i++) {
+      document.addEventListener(events[i], onFirstInteraction, true);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupFirstInteractionDetection);
+  } else {
+    setupFirstInteractionDetection();
+  }
+
+  // --- Auto Error Capture ---
+
+  window.addEventListener('error', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    sendEvent('error', {
+      message: event.message || 'Unknown error',
+      source: event.filename || '',
+      lineno: event.lineno || 0,
+      colno: event.colno || 0,
+      auto_captured: true
+    });
+  });
+
+  window.addEventListener('unhandledrejection', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    var reason = event.reason;
+    sendEvent('error', {
+      message: (reason instanceof Error) ? reason.message : String(reason),
+      type: 'unhandled_promise_rejection',
+      auto_captured: true
+    });
+  });
+
+  // --- Public API ---
+
+  window.playablesSDK = {
+    complete: function(score) {
+      sendEvent('game_ended', {
+        score: score,
+        completed: true
+      });
+    },
+
+    error: function(message) {
+      if (errorSent) return;
+      errorSent = true;
+      sendEvent('error', {
+        message: message || 'Unknown error',
+        auto_captured: false
+      });
+    },
+
+    sendEvent: function(eventName, payload) {
+      if (!eventName || typeof eventName !== 'string') return;
+      sendEvent(eventName, payload);
+    }
+  };
+
+  // Kick off rAF detection in case no game code calls rAF immediately
+  if (originalRAF) {
+    originalRAF.call(window, onFrame);
+  }
+})();</script>
+<!-- PLAYABLE_TOUCH_PATCH_V1 --><script>
+(function() {
+  if (window.__playableTouchPatchInstalled) return;
+  window.__playableTouchPatchInstalled = true;
+  var origAdd = EventTarget.prototype.addEventListener;
+  var blockedTypes = { touchstart: 1, touchmove: 1, wheel: 1 };
+  EventTarget.prototype.addEventListener = function(type, listener, options) {
+    if (blockedTypes[type]) {
+      if (options === undefined || options === null) {
+        options = { passive: true };
+      } else if (typeof options === 'boolean') {
+        options = { capture: options, passive: true };
+      } else {
+        options = Object.assign({}, options, { passive: true });
+      }
+    }
+    return origAdd.call(this, type, listener, options);
+  };
+})();
+</script><script>window.Intl=window.Intl||{};Intl.t=function(s){return(Intl._locale&&Intl._locale[s])||s;};</script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>gstudio store - Calculadora Multifuncional</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --blue: #42A1E1;
+            --green: #63CB8C;
+            --purple: #8342DC;
+            --gradient: linear-gradient(90deg, #42A1E1 0%, #63CB8C 50%, #8342DC 100%);
+            --gradient-soft: linear-gradient(90deg, rgba(66,161,225,0.15) 0%, rgba(99,203,140,0.15) 50%, rgba(131,66,220,0.15) 100%);
+            --bg: #f6f8fb;
+            --card: #ffffff;
+            --text: #1f2937;
+            --muted: #6b7280;
+            --border: #e5e7eb;
+            --shadow: 0 10px 25px -5px rgba(0,0,0,0.08), 0 4px 10px -4px rgba(0,0,0,0.04);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html, body {
+            height: 100%;
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .app {
+            width: 100%;
+            max-width: 480px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg);
+        }
+
+        header {
+            background: var(--gradient);
+            color: white;
+            padding: 28px 20px 32px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -20%;
+            width: 200px;
+            height: 200px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 50%;
+            filter: blur(40px);
+        }
+
+        header h1 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            margin-bottom: 4px;
+        }
+
+        header p {
+            font-size: 0.9rem;
+            opacity: 0.95;
+            font-weight: 400;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 8px;
+            padding: 14px 16px;
+            background: var(--card);
+            margin: -20px 16px 0;
+            border-radius: 18px;
+            box-shadow: var(--shadow);
+            position: relative;
+            z-index: 10;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+
+        .tabs::-webkit-scrollbar { display: none; }
+
+        .tab-btn {
+            flex: 1;
+            min-width: fit-content;
+            padding: 10px 14px;
+            border: none;
+            background: transparent;
+            border-radius: 12px;
+            font-family: 'Poppins', sans-serif;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--muted);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+        }
+
+        .tab-btn.active {
+            background: var(--gradient);
+            color: white;
+            box-shadow: 0 4px 12px rgba(66,161,225,0.3);
+        }
+
+        main {
+            flex: 1;
+            padding: 20px 16px 100px;
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .card {
+            background: var(--card);
+            border-radius: 24px;
+            padding: 20px;
+            box-shadow: var(--shadow);
+            margin-bottom: 16px;
+        }
+
+        .display {
+            background: var(--gradient-soft);
+            border-radius: 18px;
+            padding: 20px;
+            margin-bottom: 16px;
+            text-align: right;
+            min-height: 88px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .display-expression {
+            font-size: 0.95rem;
+            color: var(--muted);
+            min-height: 22px;
+            word-break: break-all;
+        }
+
+        .display-result {
+            font-size: 2.1rem;
+            font-weight: 600;
+            line-height: 1.2;
+            color: var(--text);
+            word-break: break-all;
+        }
+
+        .keypad {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+
+        .key {
+            aspect-ratio: 1;
+            border: none;
+            background: var(--card);
+            border-radius: 16px;
+            font-family: 'Poppins', sans-serif;
+            font-size: 1.25rem;
+            font-weight: 500;
+            color: var(--text);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.04), inset 0 0 0 1px var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+        }
+
+        .key:active {
+            transform: scale(0.94);
+            background: #f3f4f6;
+        }
+
+        .key.operator {
+            background: var(--gradient-soft);
+            color: #2563eb;
+            font-weight: 600;
+        }
+
+        .key.equals {
+            background: var(--gradient);
+            color: white;
+            font-weight: 600;
+            box-shadow: 0 6px 16px rgba(99,203,140,0.35);
+        }
+
+        .key.clear {
+            color: #ef4444;
+        }
+
+        .key.func {
+            font-size: 1.05rem;
+            color: var(--purple);
+            background: rgba(131,66,220,0.08);
+        }
+
+        .key.zero {
+            grid-column: span 2;
+            aspect-ratio: auto;
+        }
+
+        .history {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+        }
+
+        .history-title {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--muted);
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .history-list {
+            max-height: 120px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .history-item {
+            font-size: 0.9rem;
+            color: var(--muted);
+            padding: 6px 10px;
+            background: #f9fafb;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .history-item:active {
+            background: #f3f4f6;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--muted);
+            margin-bottom: 6px;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 14px 16px;
+            border: 1.5px solid var(--border);
+            border-radius: 14px;
+            font-family: 'Poppins', sans-serif;
+            font-size: 1rem;
+            background: #fcfcfd;
+            transition: all 0.2s;
+            outline: none;
+        }
+
+        input:focus, select:focus {
+            border-color: var(--blue);
+            background: white;
+            box-shadow: 0 0 0 3px rgba(66,161,225,0.15);
+        }
+
+        .btn-primary {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 14px;
+            background: var(--gradient);
+            color: white;
+            font-family: 'Poppins', sans-serif;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 6px 16px rgba(66,161,225,0.25);
+        }
+
+        .btn-primary:active {
+            transform: translateY(1px);
+            box-shadow: 0 3px 8px rgba(66,161,225,0.25);
+        }
+
+        .result-box {
+            background: var(--gradient-soft);
+            border-radius: 16px;
+            padding: 16px;
+            margin-top: 16px;
+        }
+
+        .result-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            font-size: 0.95rem;
+        }
+
+        .result-row:not(:last-child) {
+            border-bottom: 1px dashed rgba(0,0,0,0.08);
+        }
+
+        .result-label {
+            color: var(--muted);
+        }
+
+        .result-value {
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .result-value.highlight {
+            font-size: 1.15rem;
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .converter-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .converter-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .converter-arrow {
+            color: var(--green);
+            font-size: 1.2rem;
+            flex-shrink: 0;
+        }
+
+        .section-title {
+            font-size: 1.05rem;
+            font-weight: 600;
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-title::before {
+            content: '';
+            width: 4px;
+            height: 20px;
+            background: var(--gradient);
+            border-radius: 2px;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        footer {
+            text-align: center;
+            padding: 24px 16px;
+            color: var(--muted);
+            font-size: 0.85rem;
+            margin-top: auto;
+            background: var(--card);
+            border-top: 1px solid var(--border);
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            background: var(--gradient);
+            color: white;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+
+        @media (min-width: 768px) {
+            .app {
+                margin: 20px auto;
+                min-height: calc(100vh - 40px);
+                border-radius: 32px;
+                overflow: hidden;
+                box-shadow: 0 25px 50px -12px rgba(0,0,0,0.15);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <header>
+            <h1>gstudio store</h1>
+            <p>Calculadora Multifuncional</p>
+        </header>
+
+        <nav class="tabs">
+            <button class="tab-btn active" data-tab="normal">Normal</button>
+            <button class="tab-btn" data-tab="cientifica">Científica</button>
+            <button class="tab-btn" data-tab="financeira">Financeira</button>
+            <button class="tab-btn" data-tab="conversor">Conversor</button>
+            <button class="tab-btn" data-tab="data">Data</button>
+        </nav>
+
+        <main>
+            <!-- NORMAL -->
+            <section id="normal" class="tab-content active">
+                <div class="card">
+                    <div class="display">
+                        <div class="display-expression" id="normal-expr"></div>
+                        <div class="display-result" id="normal-result">0</div>
+                    </div>
+                    <div class="keypad">
+                        <button class="key clear" data-value="C">C</button>
+                        <button class="key operator" data-value="%">%</button>
+                        <button class="key operator" data-value="back">⌫</button>
+                        <button class="key operator" data-value="/">÷</button>
+                        
+                        <button class="key" data-value="7">7</button>
+                        <button class="key" data-value="8">8</button>
+                        <button class="key" data-value="9">9</button>
+                        <button class="key operator" data-value="*">×</button>
+                        
+                        <button class="key" data-value="4">4</button>
+                        <button class="key" data-value="5">5</button>
+                        <button class="key" data-value="6">6</button>
+                        <button class="key operator" data-value="-">−</button>
+                        
+                        <button class="key" data-value="1">1</button>
+                        <button class="key" data-value="2">2</button>
+                        <button class="key" data-value="3">3</button>
+                        <button class="key operator" data-value="+">+</button>
+                        
+                        <button class="key zero" data-value="0">0</button>
+                        <button class="key" data-value=".">,</button>
+                        <button class="key equals" data-value="=">=</button>
+                    </div>
+                    <div class="history">
+                        <div class="history-title">Histórico</div>
+                        <div class="history-list" id="normal-history"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- CIENTIFICA -->
+            <section id="cientifica" class="tab-content">
+                <div class="card">
+                    <div class="display">
+                        <div class="display-expression" id="sci-expr"></div>
+                        <div class="display-result" id="sci-result">0</div>
+                    </div>
+                    <div class="keypad">
+                        <button class="key func" data-sci="sin(">sin</button>
+                        <button class="key func" data-sci="cos(">cos</button>
+                        <button class="key func" data-sci="tan(">tan</button>
+                        <button class="key func" data-sci="^">xʸ</button>
+                        
+                        <button class="key func" data-sci="log(">log</button>
+                        <button class="key func" data-sci="ln(">ln</button>
+                        <button class="key func" data-sci="sqrt(">√</button>
+                        <button class="key operator" data-sci="/">÷</button>
+                        
+                        <button class="key func" data-sci="pi">π</button>
+                        <button class="key" data-sci="7">7</button>
+                        <button class="key" data-sci="8">8</button>
+                        <button class="key" data-sci="9">9</button>
+                        
+                        <button class="key func" data-sci="e">e</button>
+                        <button class="key" data-sci="4">4</button>
+                        <button class="key" data-sci="5">5</button>
+                        <button class="key" data-sci="6">6</button>
+                        
+                        <button class="key func" data-sci="("> ( </button>
+                        <button class="key" data-sci="1">1</button>
+                        <button class="key" data-sci="2">2</button>
+                        <button class="key" data-sci="3">3</button>
+                        
+                        <button class="key func" data-sci=")"> ) </button>
+                        <button class="key operator" data-sci="*">×</button>
+                        <button class="key operator" data-sci="-">−</button>
+                        <button class="key operator" data-sci="+">+</button>
+                        
+                        <button class="key clear" data-sci="C">C</button>
+                        <button class="key" data-sci="0">0</button>
+                        <button class="key" data-sci=".">,</button>
+                        <button class="key operator" data-sci="back">⌫</button>
+                    </div>
+                    <div class="keypad" style="margin-top: 10px; grid-template-columns: 1fr;">
+                        <button class="key equals" data-sci="=">=</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- FINANCEIRA -->
+            <section id="financeira" class="tab-content">
+                <div class="card">
+                    <h3 class="section-title">Simulador de Parcelas</h3>
+                    <div class="form-group">
+                        <label>Valor (R$)</label>
+                        <input type="number" id="fin-valor" placeholder="Ex: 1000" inputmode="decimal">
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label>Juros mensal (%)</label>
+                            <input type="number" id="fin-juros" placeholder="Ex: 1,99" step="0.01" inputmode="decimal">
+                        </div>
+                        <div class="form-group">
+                            <label>Parcelas</label>
+                            <input type="number" id="fin-parcelas" placeholder="Ex: 12" inputmode="numeric">
+                        </div>
+                    </div>
+                    <button class="btn-primary" onclick="calcularParcela()">Calcular Parcela</button>
+                    <div class="result-box" id="fin-result" style="display:none">
+                        <div class="result-row">
+                            <span class="result-label">Valor da parcela</span>
+                            <span class="result-value highlight" id="fin-parcela">R$ 0,00</span>
+                        </div>
+                        <div class="result-row">
+                            <span class="result-label">Total pago</span>
+                            <span class="result-value" id="fin-total">R$ 0,00</span>
+                        </div>
+                        <div class="result-row">
+                            <span class="result-label">Juros totais</span>
+                            <span class="result-value" id="fin-juros-total">R$ 0,00</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3 class="section-title">Calculadora de Desconto <span class="badge">NOVO</span></h3>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label>Preço (R$)</label>
+                            <input type="number" id="desc-preco" placeholder="Ex: 299" inputmode="decimal">
+                        </div>
+                        <div class="form-group">
+                            <label>Desconto (%)</label>
+                            <input type="number" id="desc-perc" placeholder="Ex: 15" inputmode="decimal">
+                        </div>
+                    </div>
+                    <button class="btn-primary" onclick="calcularDesconto()">Calcular Desconto</button>
+                    <div class="result-box" id="desc-result" style="display:none">
+                        <div class="result-row">
+                            <span class="result-label">Você economiza</span>
+                            <span class="result-value" id="desc-economia">R$ 0,00</span>
+                        </div>
+                        <div class="result-row">
+                            <span class="result-label">Preço final</span>
+                            <span class="result-value highlight" id="desc-final">R$ 0,00</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- CONVERSOR -->
+            <section id="conversor" class="tab-content">
+                <div class="card">
+                    <h3 class="section-title">Comprimento</h3>
+                    <div class="converter-item">
+                        <input type="number" id="conv-metros" placeholder="Metros" inputmode="decimal">
+                        <span class="converter-arrow">→</span>
+                        <input type="number" id="conv-km" placeholder="Quilômetros" inputmode="decimal" readonly style="background:#f3f4f6">
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3 class="section-title">Peso</h3>
+                    <div class="converter-item">
+                        <input type="number" id="conv-kg" placeholder="Quilogramas" inputmode="decimal">
+                        <span class="converter-arrow">→</span>
+                        <input type="number" id="conv-lb" placeholder="Libras" inputmode="decimal" readonly style="background:#f3f4f6">
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3 class="section-title">Temperatura</h3>
+                    <div class="converter-item">
+                        <input type="number" id="conv-c" placeholder="Celsius (°C)" inputmode="decimal">
+                        <span class="converter-arrow">→</span>
+                        <input type="number" id="conv-f" placeholder="Fahrenheit (°F)" inputmode="decimal" readonly style="background:#f3f4f6">
+                    </div>
+                </div>
+            </section>
+
+            <!-- DATA -->
+            <section id="data" class="tab-content">
+                <div class="card">
+                    <h3 class="section-title">Dias entre datas</h3>
+                    <div class="form-group">
+                        <label>Data inicial</label>
+                        <input type="date" id="data-inicio">
+                    </div>
+                    <div class="form-group">
+                        <label>Data final</label>
+                        <input type="date" id="data-fim">
+                    </div>
+                    <button class="btn-primary" onclick="calcularDias()">Calcular Diferença</button>
+                    <div class="result-box" id="data-result" style="display:none">
+                        <div class="result-row">
+                            <span class="result-label">Diferença</span>
+                            <span class="result-value highlight" id="data-dias">0 dias</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3 class="section-title">Adicionar dias</h3>
+                    <div class="form-group">
+                        <label>Data inicial</label>
+                        <input type="date" id="data-add-inicio">
+                    </div>
+                    <div class="form-group">
+                        <label>Dias a adicionar</label>
+                        <input type="number" id="data-add-dias" placeholder="Ex: 30" inputmode="numeric">
+                    </div>
+                    <button class="btn-primary" onclick="adicionarDias()">Calcular Nova Data</button>
+                    <div class="result-box" id="data-add-result" style="display:none">
+                        <div class="result-row">
+                            <span class="result-label">Nova data</span>
+                            <span class="result-value highlight" id="data-nova">--/--/----</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            © 2026 gstudio store. Todos os direitos reservados.
+        </footer>
+    </div>
+
+    <script>
+        // Tabs
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById(btn.dataset.tab).classList.add('active');
+            });
+        });
+
+        // NORMAL CALCULATOR
+        let normalExpr = '';
+        const normalResultEl = document.getElementById('normal-result');
+        const normalExprEl = document.getElementById('normal-expr');
+        const normalHistory = document.getElementById('normal-history');
+        let history = [];
+
+        function updateNormalDisplay() {
+            normalExprEl.textContent = normalExpr.replace(/\*/g, '×').replace(/\//g, '÷');
+            normalResultEl.textContent = normalExpr === '' ? '0' : normalExpr;
+        }
+
+        document.querySelectorAll('#normal .key').forEach(key => {
+            key.addEventListener('click', () => {
+                const val = key.dataset.value;
+                
+                if (val === 'C') {
+                    normalExpr = '';
+                } else if (val === 'back') {
+                    normalExpr = normalExpr.slice(0, -1);
+                } else if (val === '=') {
+                    try {
+                        const expr = normalExpr.replace(/%/g, '/100');
+                        const result = Function('"use strict"; return (' + expr + ')')();
+                        const formatted = Number.isFinite(result) ? parseFloat(result.toFixed(10)).toString() : 'Erro';
+                        history.unshift(`${normalExpr.replace(/\*/g,'×').replace(/\//g,'÷')} = ${formatted}`);
+                        if (history.length > 8) history.pop();
+                        updateHistory();
+                        normalExpr = formatted === 'Erro' ? '' : formatted;
+                    } catch {
+                        normalExpr = '';
+                        normalResultEl.textContent = 'Erro';
+                        setTimeout(updateNormalDisplay, 1000);
+                        return;
+                    }
+                } else if (val === '%') {
+                    normalExpr += '%';
+                } else {
+                    normalExpr += val;
+                }
+                updateNormalDisplay();
+            });
+        });
+
+        function updateHistory() {
+            normalHistory.innerHTML = history.map(h => `<div class="history-item">${h}</div>`).join('');
+            document.querySelectorAll('.history-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const val = item.textContent.split('=')[1].trim();
+                    normalExpr = val;
+                    updateNormalDisplay();
+                });
+            });
+        }
+
+        // CIENTIFICA
+        let sciExpr = '';
+        const sciResultEl = document.getElementById('sci-result');
+        const sciExprEl = document.getElementById('sci-expr');
+
+        function updateSciDisplay() {
+            sciExprEl.textContent = sciExpr;
+            sciResultEl.textContent = sciExpr === '' ? '0' : sciExpr;
+        }
+
+        document.querySelectorAll('[data-sci]').forEach(key => {
+            key.addEventListener('click', () => {
+                const val = key.dataset.sci;
+                
+                if (val === 'C') {
+                    sciExpr = '';
+                } else if (val === 'back') {
+                    sciExpr = sciExpr.slice(0, -1);
+                } else if (val === '=') {
+                    try {
+                        let expr = sciExpr
+                            .replace(/×/g, '*').replace(/÷/g, '/')
+                            .replace(/pi/g, 'Math.PI')
+                            .replace(/e/g, 'Math.E')
+                            .replace(/\^/g, '**')
+                            .replace(/sqrt\(/g, 'Math.sqrt(')
+                            .replace(/log\(/g, 'Math.log10(')
+                            .replace(/ln\(/g, 'Math.log(');
+                        
+                        const sinDeg = d => Math.sin(d * Math.PI / 180);
+                        const cosDeg = d => Math.cos(d * Math.PI / 180);
+                        const tanDeg = d => Math.tan(d * Math.PI / 180);
+                        
+                        expr = expr.replace(/sin\(/g, 'sinDeg(').replace(/cos\(/g, 'cosDeg(').replace(/tan\(/g, 'tanDeg(');
+                        
+                        const result = Function('sinDeg', 'cosDeg', 'tanDeg', '"use strict"; return (' + expr + ')')(sinDeg, cosDeg, tanDeg);
+                        const formatted = Number.isFinite(result) ? parseFloat(result.toFixed(10)).toString() : 'Erro';
+                        sciExpr = formatted === 'Erro' ? '' : formatted;
+                    } catch {
+                        sciExpr = '';
+                        sciResultEl.textContent = 'Erro';
+                        setTimeout(updateSciDisplay, 1000);
+                        return;
+                    }
+                } else {
+                    sciExpr += val;
+                }
+                updateSciDisplay();
+            });
+        });
+
+        // FINANCEIRA
+        function formatarBRL(valor) {
+            return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        }
+
+        function calcularParcela() {
+            const vp = parseFloat(document.getElementById('fin-valor').value) || 0;
+            const juros = parseFloat(document.getElementById('fin-juros').value) || 0;
+            const n = parseInt(document.getElementById('fin-parcelas').value) || 0;
+            
+            if (vp <= 0 || n <= 0) return;
+            
+            const i = juros / 100;
+            let parcela;
+            
+            if (i === 0) {
+                parcela = vp / n;
+            } else {
+                parcela = vp * (i * Math.pow(1 + i, n)) / (Math.pow(1 + i, n) - 1);
+            }
+            
+            const total = parcela * n;
+            const jurosTotal = total - vp;
+            
+            document.getElementById('fin-parcela').textContent = formatarBRL(parcela);
+            document.getElementById('fin-total').textContent = formatarBRL(total);
+            document.getElementById('fin-juros-total').textContent = formatarBRL(jurosTotal);
+            document.getElementById('fin-result').style.display = 'block';
+        }
+
+        function calcularDesconto() {
+            const preco = parseFloat(document.getElementById('desc-preco').value) || 0;
+            const perc = parseFloat(document.getElementById('desc-perc').value) || 0;
+            
+            if (preco <= 0) return;
+            
+            const economia = preco * (perc / 100);
+            const final = preco - economia;
+            
+            document.getElementById('desc-economia').textContent = formatarBRL(economia);
+            document.getElementById('desc-final').textContent = formatarBRL(final);
+            document.getElementById('desc-result').style.display = 'block';
+        }
+
+        // CONVERSOR
+        document.getElementById('conv-metros').addEventListener('input', e => {
+            const m = parseFloat(e.target.value) || 0;
+            document.getElementById('conv-km').value = (m / 1000).toFixed(4).replace(/\.?0+$/, '');
+        });
+
+        document.getElementById('conv-kg').addEventListener('input', e => {
+            const kg = parseFloat(e.target.value) || 0;
+            document.getElementById('conv-lb').value = (kg * 2.20462).toFixed(2);
+        });
+
+        document.getElementById('conv-c').addEventListener('input', e => {
+            const c = parseFloat(e.target.value) || 0;
+            document.getElementById('conv-f').value = ((c * 9/5) + 32).toFixed(1);
+        });
+
+        // DATA
+        function calcularDias() {
+            const inicio = document.getElementById('data-inicio').value;
+            const fim = document.getElementById('data-fim').value;
+            
+            if (!inicio || !fim) return;
+            
+            const d1 = new Date(inicio + 'T00:00:00');
+            const d2 = new Date(fim + 'T00:00:00');
+            const diff = Math.abs(d2 - d1);
+            const dias = Math.round(diff / (1000 * 60 * 60 * 24));
+            
+            document.getElementById('data-dias').textContent = `${dias} ${dias === 1 ? 'dia' : 'dias'}`;
+            document.getElementById('data-result').style.display = 'block';
+        }
+
+        function adicionarDias() {
+            const inicio = document.getElementById('data-add-inicio').value;
+            const dias = parseInt(document.getElementById('data-add-dias').value) || 0;
+            
+            if (!inicio) return;
+            
+            const d = new Date(inicio + 'T00:00:00');
+            d.setDate(d.getDate() + dias);
+            
+            const formatado = d.toLocaleDateString('pt-BR');
+            document.getElementById('data-nova').textContent = formatado;
+            document.getElementById('data-add-result').style.display = 'block';
+        }
+
+        // Set today's date as default
+        const hoje = new Date().toISOString().split('T')[0];
+        document.getElementById('data-inicio').value = hoje;
+        document.getElementById('data-fim').value = hoje;
+        document.getElementById('data-add-inicio').value = hoje;
+    </script>
+</body>
+</html>
